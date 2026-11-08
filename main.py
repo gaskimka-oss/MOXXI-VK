@@ -104,17 +104,17 @@ async def _clean_message_answer(self, message=None, *args, **kwargs):
 
 Message.answer = _clean_message_answer
 
-# Смещение для VK пользователей и чатов в единой SQLite базе
-VK_USER_OFFSET = 70_000_000_000
+# Изолированная база данных ВКонтакте (moxxi_vk.db)
+VK_USER_OFFSET = 0
 
 def to_db_uid(vk_id: int) -> int:
-    return VK_USER_OFFSET + int(vk_id)
+    return int(vk_id)
 
 def from_db_uid(db_id: int) -> int:
-    return db_id - VK_USER_OFFSET if db_id >= VK_USER_OFFSET else db_id
+    return int(db_id)
 
 def to_db_cid(peer_id: int) -> int:
-    return -70_000_000_000 - (peer_id - 2000000000) if peer_id > 2000000000 else peer_id
+    return int(peer_id)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -668,7 +668,7 @@ async def vk_message_handler(message: Message):
                 return await message.answer(commands_catalog.get_hub_text(), keyboard=commands_catalog.get_hub_keyboard())
 
     # ➕ ДОБАВЛЕНИЕ В БЕСЕДУ
-    if (cmd == "в" and args in ("беседу", "беседы")) or (cmd == "добавить" and "бесед" in args) or cmd in ("беседа", "беседу", "пригласить", "в_беседу", "вбеседу"):
+    if (cmd == "в" and args in ("беседу", "беседы", "группу", "чат")) or cmd in ("добавить", "инвайт", "invite", "беседа", "беседу", "пригласить", "в_беседу", "вбеседу"):
         invite_kb = Keyboard(inline=True)
         invite_kb.add(OpenLink("https://vk.com/club243066051", "➕ Добавить в беседу"))
         return await message.answer(
@@ -2543,8 +2543,16 @@ async def main():
     asyncio.create_task(yookassa_payment_poller())
     asyncio.create_task(auction_tick_worker())
     log.info("Запуск фоновых воркеров (ЮКасса платежи + Аукционы) успешен.")
-    log.info("Запуск LongPoll прослушивания сообщений ВКонтакте...")
-    await bot.run_polling()
+
+    while True:
+        try:
+            log.info("Запуск LongPoll прослушивания сообщений ВКонтакте...")
+            await bot.run_polling()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error("LongPoll ВКонтакте временно отключился (%s). Переподключение через 5 сек...", e)
+            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
