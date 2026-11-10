@@ -441,17 +441,32 @@ async def generate_moxxi_ai_reply(prompt: str, user_name: str) -> str:
 # 🌉 ОМНИКАНАЛЬНЫЙ МОСТ В TELEGRAM
 # ═══════════════════════════════════════════════════════════════
 
-async def notify_telegram_about_ticket(ticket_id: int, user_id: int, user_name: str, question: str):
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+if not DISCORD_TOKEN:
+    for p in [r"C:\Users\eiema\OneDrive\Desktop\MOXXI Support\.env", r"C:\Users\eiema\OneDrive\Desktop\moxxidc\.env"]:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for l in f:
+                        if l.startswith("DISCORD_BOT_TOKEN="):
+                            DISCORD_TOKEN = l.split("=", 1)[1].strip()
+                            break
+            except Exception:
+                pass
+
+
+async def notify_telegram_about_ticket(ticket_id: int, user_id: int, user_name: str, question: str, category: str = "Общее"):
     if not TG_BOT_TOKEN:
         return
     admin_text = (
-        f"🆘 🔔 <b>НОВЫЙ ТИКЕТ ИЗ ВКОНТАКТЕ #{ticket_id}</b>\n"
+        f"🆘 🔔 <b>НОВОЕ ОБРАЩЕНИЕ ИЗ ВКОНТАКТЕ #{ticket_id}</b>\n"
         f"🌐 <b>Платформа:</b> 🔷 ВКонтакте\n"
+        f"📂 <b>Категория:</b> {html.escape(category)}\n"
         f"┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
         f"👤 <b>Пользователь:</b> {html.escape(user_name)}\n"
         f"🔗 <b>Ссылка:</b> https://vk.com/id{user_id}\n"
         f"🆔 <b>VK ID:</b> <code>{user_id}</code>\n\n"
-        f"📝 <b>Вопрос / Проблема:</b>\n«{html.escape(question)}»\n\n"
+        f"📝 <b>Вопрос / Суть:</b>\n«{html.escape(question)}»\n\n"
         f"💡 <b>Для ответа пользователю прямо из Telegram:</b>\n"
         f"• <code>+ответ {ticket_id} [текст вашего ответа]</code>\n"
         f"• <code>автоответ тикет {ticket_id} [1-5]</code>\n"
@@ -465,6 +480,69 @@ async def notify_telegram_about_ticket(ticket_id: int, user_id: int, user_name: 
                 await session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5))
             except Exception as e:
                 log.warning("Ошибка отправки в Telegram: %s", e)
+
+
+async def notify_discord_about_ticket(ticket_id: int, user_id: int, user_name: str, question: str, category: str = "Общее"):
+    if not DISCORD_TOKEN:
+        return
+    queue_ch_id = 1569227215160221797
+    payload = {
+        "embeds": [
+            {
+                "title": f"🎫 ОБРАЩЕНИЕ ИЗ VK • #{ticket_id} [{category}]",
+                "description": (
+                    f"👤 **Пользователь:** `{user_name}` (VK ID: `{user_id}`)\n"
+                    f"🔗 **Профиль VK:** https://vk.com/id{user_id}\n"
+                    f"📱 **Платформа:** `🔷 ВКонтакте`\n"
+                    f"📂 **Категория:** `{category}`\n"
+                    f"⏱ **Время:** <t:{int(time.time())}:R>\n\n"
+                    f"───────────────────────────────\n"
+                    f"📝 **Вопрос / Суть обращения:**\n{question[:1500]}\n"
+                    f"───────────────────────────────"
+                ),
+                "color": 298495,
+                "footer": {"text": "MOXXI Omnichannel Desk • ВКонтакте ⇄ Discord"}
+            }
+        ],
+        "components": [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 3,
+                        "label": "✋ Взять тикет",
+                        "custom_id": f"st_omni_claim:{ticket_id}",
+                        "emoji": {"name": "💬"}
+                    },
+                    {
+                        "type": 2,
+                        "style": 2,
+                        "label": "🤖 Авто-ответ ИИ",
+                        "custom_id": f"st_omni_ai:{ticket_id}",
+                        "emoji": {"name": "🤖"}
+                    },
+                    {
+                        "type": 2,
+                        "style": 4,
+                        "label": "🔒 Закрыть",
+                        "custom_id": f"st_omni_close:{ticket_id}",
+                        "emoji": {"name": "🚫"}
+                    }
+                ]
+            }
+        ]
+    }
+    url = f"https://discord.com/api/v10/channels/{queue_ch_id}/messages"
+    headers = {
+        "Authorization": f"Bot {DISCORD_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            await session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5))
+        except Exception as e:
+            log.warning("Ошибка отправки тикета VK в Discord: %s", e)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2393,13 +2471,34 @@ async def vk_message_handler(message: Message):
         )
         return await message.answer(bid_ann)
 
-    if cmd in ("поддержка", "тикет", "ticket"):
+    if cmd in ("поддержка", "тикет", "ticket", "баг", "ошибка", "репорт", "жалоба", "идея", "предложение"):
         if not args:
-            return await message.answer("Напишите: «поддержка [вопрос]»")
+            return await message.answer(
+                "🆘 Служба заботы и поддержки MOXXI (ВКонтакте):\n\n"
+                "• Чтобы сообщить о проблеме или баге:\n"
+                "  👉 Напишите: «поддержка [описание]» или «баг [описание]»\n\n"
+                "• Чтобы предложить крутую идею или улучшение:\n"
+                "  👉 Напишите: «идея [текст идеи]»\n\n"
+                "• Наш Discord сервер: https://discord.gg/7hDq4R2q\n"
+                "• Telegram сообщество: https://t.me/moxxi_chat"
+            )
         fn, ln = await get_vk_user_info(user_id)
-        t_id = await db.create_support_ticket(db_uid, f"{fn} {ln}".strip(), args, status="open", platform="vk", platform_peer_id=message.peer_id)
-        await notify_telegram_about_ticket(t_id, user_id, f"{fn} {ln}".strip(), args)
-        return await message.answer(f"✅ Тикет #{t_id} принят! Администрация ответит вам прямо в этот диалог.")
+        user_name = f"{fn} {ln}".strip()
+        is_idea = cmd in ("идея", "предложение")
+        is_bug = cmd in ("баг", "ошибка", "репорт", "жалоба")
+        cat = "💡 Идея / Предложение" if is_idea else ("🛠 Баг / Ошибка" if is_bug else "Общее")
+
+        t_id = await db.create_support_ticket(db_uid, user_name, args, status="open", platform="vk", platform_peer_id=message.peer_id)
+        await notify_telegram_about_ticket(t_id, user_id, user_name, args, category=cat)
+        await notify_discord_about_ticket(t_id, user_id, user_name, args, category=cat)
+
+        icon = "💡" if is_idea else ("🛠" if is_bug else "🆘")
+        label = "Идея" if is_idea else ("Багрепорт" if is_bug else "Тикет")
+        return await message.answer(
+            f"{icon} {label} #{t_id} успешно принят!\n\n"
+            f"📝 Обращение передано дежурной администрации в Telegram и Discord. "
+            f"Ответ придёт вам прямо в этот диалог!"
+        )
 
     # Если обращение адресовано Мокси как ИИ
     if ai_match:
@@ -2418,6 +2517,59 @@ async def vk_message_handler(message: Message):
 # ═══════════════════════════════════════════════════════════════
 # 🚀 ТОЧКА ВХОДА
 # ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
+# 📢 АВТОСООБЩЕНИЯ О ПОДДЕРЖКЕ И ИДЕЯХ В VK (КАЖДЫЕ 3 ЧАСА)
+# ═══════════════════════════════════════════════════════════════
+
+async def vk_support_broadcast_loop():
+    """Фоновая рассылка каждые 3 часа во все активные беседы ВКонтакте."""
+    log.info("Запущен воркер автосообщений техподдержки и идей ВКонтакте (интервал: 3 часа)...")
+    await asyncio.sleep(60)
+    while True:
+        try:
+            now = int(time.time())
+            interval = 3 * 3600  # 3 часа = 10800 секунд
+            chats = await db.get_all_vk_chats()
+
+            broadcast_text = (
+                "💜✨ СЛУЖБА ЗАБОТЫ И ПОДДЕРЖКИ MOXXI ✨💜\n"
+                "──────────────────────────────────\n"
+                "Нашли баг, ошибку или хотите предложить крутую идею для обновления?\n"
+                "Мы всегда на связи и ценим каждого игрока нашего сообщества!\n\n"
+                "📝 Как обратиться к разработчикам и администрации:\n"
+                "• 🆘 Сообщить о баге или проблеме:\n"
+                "  👉 Напишите в беседу: поддержка [описание проблемы / бага]\n"
+                "  (или: баг [описание] / репорт [текст])\n\n"
+                "• 💡 Предложить новую идею или фичу:\n"
+                "  👉 Напишите в беседу: идея [текст вашей идеи]\n\n"
+                "🌐 Официальные каналы связи:\n"
+                "• 🎮 Discord Сервер Поддержки: https://discord.gg/7hDq4R2q\n"
+                "• ✈️ Telegram Чат Игроков: https://t.me/moxxi_chat\n"
+                "• 🎫 ЛС Сообщества: напишите «поддержка» прямо сюда!\n\n"
+                "⚡️ Все ваши обращения мгновенно отправляются дежурной команде модераторов в Telegram и Discord! ❤️"
+            )
+
+            for ch in chats:
+                peer_id = ch["peer_id"]
+                last_ts = ch.get("last_broadcast_ts") or 0
+                if (now - last_ts) >= interval:
+                    try:
+                        await bot.api.messages.send(
+                            peer_id=peer_id,
+                            message=broadcast_text,
+                            random_id=random.randint(1, 100000000)
+                        )
+                        await db.update_vk_chat_broadcast_ts(peer_id, now)
+                        await asyncio.sleep(1.0)
+                    except Exception as e:
+                        log.debug("Ошибка авторассылки в беседу VK %d: %s", peer_id, e)
+
+        except Exception as e:
+            log.warning("Исключение в vk_support_broadcast_loop: %s", e)
+        await asyncio.sleep(60)
+
 
 async def yookassa_payment_poller():
     """Фоновый воркер: каждые 10 секунд проверяет статус ожидающих платежей и выдаёт заказы."""
@@ -2541,6 +2693,7 @@ async def main():
         log.error("Ошибка проверки группы VK: %s", e)
 
     asyncio.create_task(yookassa_payment_poller())
+    asyncio.create_task(vk_support_broadcast_loop())
     asyncio.create_task(auction_tick_worker())
     log.info("Запуск фоновых воркеров (ЮКасса платежи + Аукционы) успешен.")
 

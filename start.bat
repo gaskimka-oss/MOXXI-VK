@@ -1,16 +1,21 @@
 @echo off
 chcp 65001 > nul
-title MOXXI 3.0 -- VKontakte Bot (moxxivk)
+title MOXXI 3.0 — VKontakte Bot (moxxivk)
 echo ===================================================
-echo   Zapusk avtonomnogo bota MOXXI dlya VKontakte...
+echo   Запуск автономного бота MOXXI для ВКонтакте...
+echo   Авто-перезапуск при сбоях ВКЛЮЧЕН!
 echo ===================================================
 
-if exist "..\бот2.0\venv\Scripts\python.exe" (
-    "..\бот2.0\venv\Scripts\python.exe" main.py
-) else if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
-    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" main.py
-) else (
-    python main.py
+set PYTHON_EXE=..\бот2.0\venv\Scripts\python.exe
+if not exist "%PYTHON_EXE%" (
+    set PYTHON_EXE=C:\Users\eiema\OneDrive\Desktop\бот2.0\venv\Scripts\python.exe
 )
 
-pause
+:loop
+echo [%date% %time%] Запуск процесса MOXXI VKontakte...
+"%PYTHON_EXE%" main.py
+echo.
+echo [!] MOXXI VKontakte завершился или произошел сетевой сбой (%date% %time%).
+echo [!] Автоматический перезапуск через 5 секунд... (Ctrl+C для остановки)
+timeout /t 5 > nul
+goto loop
