@@ -91,7 +91,15 @@ _orig_messages_send = bot.api.messages.send
 async def _clean_vk_messages_send(*args, **kwargs):
     if "message" in kwargs and isinstance(kwargs["message"], str):
         kwargs["message"] = re.sub(r"</?(?:b|i|code|u|s|pre|a|span|div)[^>]*>", "", kwargs["message"])
-    return await _orig_messages_send(*args, **kwargs)
+    try:
+        return await _orig_messages_send(*args, **kwargs)
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "too much buttons" in err_msg or "keyboard format is invalid" in err_msg or "911" in err_msg:
+            logger.warning(f"Keyboard format error intercepted in messages.send, retrying without keyboard: {e}")
+            kwargs.pop("keyboard", None)
+            return await _orig_messages_send(*args, **kwargs)
+        raise
 
 bot.api.messages.send = _clean_vk_messages_send
 
@@ -100,7 +108,15 @@ _orig_message_answer = Message.answer
 async def _clean_message_answer(self, message=None, *args, **kwargs):
     if message and isinstance(message, str):
         message = re.sub(r"</?(?:b|i|code|u|s|pre|a|span|div)[^>]*>", "", message)
-    return await _orig_message_answer(self, message, *args, **kwargs)
+    try:
+        return await _orig_message_answer(self, message, *args, **kwargs)
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "too much buttons" in err_msg or "keyboard format is invalid" in err_msg or "911" in err_msg:
+            logger.warning(f"Keyboard format error intercepted in Message.answer, retrying without keyboard: {e}")
+            kwargs.pop("keyboard", None)
+            return await _orig_message_answer(self, message, *args, **kwargs)
+        raise
 
 Message.answer = _clean_message_answer
 
@@ -702,15 +718,26 @@ async def vk_message_handler(message: Message):
     _is_section_word = cmd in ("раздел", "разделы")
     _is_all_sections = "все команды" in _c_low or "все разделы" in _c_low or (cmd in ("все", "всё") and ("раздел" in _a_low or "команд" in _a_low))
     _is_search = cmd in ("найти", "поиск", "искать", "поиск_команд", "search")
+    _is_paged_nav = any(p in _c_low for p in ("далее", "назад", "7-12", "1-6"))
+    _is_page2 = "далее" in _c_low or "7-12" in _c_low or (cmd in ("команды", "команда", "хелп", "help", "меню", "каталог", "разделы") and _a_low in ("2", "стр 2", "стр. 2", "страница 2", "далее"))
+    _is_page1 = "назад" in _c_low or "1-6" in _c_low or (cmd in ("команды", "команда", "хелп", "help", "меню", "каталог", "разделы") and _a_low in ("1", "стр 1", "стр. 1", "страница 1", "назад"))
     _is_nav_text = any(phrase in _c_low for phrase in (
         "модерация", "баны/варны", "настройки", "экономика", "бизнесы/дома",
         "казино/игры", "данжи/фарм", "квесты/vip", "кланы/боссы", "семья/кпз",
         "рп романтика", "рп боевые", "все разделы"
     ))
 
-    if _is_help_cmd or _is_nav_num or _is_section_word or _is_all_sections or _is_search or _is_nav_text:
+    if _is_help_cmd or _is_nav_num or _is_section_word or _is_all_sections or _is_search or _is_nav_text or _is_paged_nav:
+        # Переход на страницу 2 каталога (разделы 7-12)
+        if _is_page2:
+            return await message.answer(commands_catalog.get_hub_text(page=2), keyboard=commands_catalog.get_hub_keyboard(page=2))
+
+        # Переход на страницу 1 каталога (разделы 1-6)
+        elif _is_page1:
+            return await message.answer(commands_catalog.get_hub_text(page=1), keyboard=commands_catalog.get_hub_keyboard(page=1))
+
         # Поиск по каталогу всех 415+ команд
-        if _is_search or (cmd in ("команды", "помощь") and (_a_low.startswith("найти ") or _a_low.startswith("поиск "))):
+        elif _is_search or (cmd in ("команды", "помощь") and (_a_low.startswith("найти ") or _a_low.startswith("поиск "))):
             search_query = args
             if _a_low.startswith("найти ") or _a_low.startswith("поиск "):
                 search_query = _a_low.split(maxsplit=1)[1]
@@ -728,19 +755,19 @@ async def vk_message_handler(message: Message):
                     "• «найти казино» — рулетка, 21, краш, слоты\n"
                     "• «найти клан» — кланы, казна, войны"
                 )
-                return await message.answer(guide_txt, keyboard=commands_catalog.get_hub_keyboard())
-            return await message.answer(commands_catalog.search_commands(search_query), keyboard=commands_catalog.get_hub_keyboard())
+                return await message.answer(guide_txt, keyboard=commands_catalog.get_hub_keyboard(page=1))
+            return await message.answer(commands_catalog.search_commands(search_query), keyboard=commands_catalog.get_hub_keyboard(page=1))
 
         # Нажатие на "Все разделы" / "Все команды" или возврат в главное меню
         elif "все разделы" in _c_low or "все_разделы" in _c_low or "все команды" in _c_low or (cmd in ("все", "всё") and ("раздел" in _a_low or "команд" in _a_low)):
-            return await message.answer(commands_catalog.get_hub_text(), keyboard=commands_catalog.get_hub_keyboard())
+            return await message.answer(commands_catalog.get_hub_text(page=1), keyboard=commands_catalog.get_hub_keyboard(page=1))
 
         # Полный дамп всех 12 разделов сразу
         elif _a_low in ("все", "всё", "all") or _a_low.startswith("все ") or _a_low.startswith("всё "):
             for s_idx in range(1, 12):
                 await message.answer(commands_catalog.get_section_text(s_idx))
                 await asyncio.sleep(0.3)
-            return await message.answer(commands_catalog.get_section_text(12), keyboard=commands_catalog.get_hub_keyboard())
+            return await message.answer(commands_catalog.get_section_text(12), keyboard=commands_catalog.get_hub_keyboard(page=1))
 
         else:
             # Определение номера раздела 1..12
@@ -770,7 +797,7 @@ async def vk_message_handler(message: Message):
             if sec_found:
                 return await message.answer(commands_catalog.get_section_text(sec_found), keyboard=commands_catalog.get_section_keyboard(sec_found))
             else:
-                return await message.answer(commands_catalog.get_hub_text(), keyboard=commands_catalog.get_hub_keyboard())
+                return await message.answer(commands_catalog.get_hub_text(page=1), keyboard=commands_catalog.get_hub_keyboard(page=1))
 
     # 🌟 ОБРАБОТЧИК РАСШИРЕННЫХ СИСТЕМ (400+ КОМАНД)
     try:
