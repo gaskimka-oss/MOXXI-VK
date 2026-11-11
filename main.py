@@ -473,10 +473,36 @@ async def notify_telegram_about_ticket(ticket_id: int, user_id: int, user_name: 
         f"• <code>закрыть тикет {ticket_id}</code>"
     )
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    async with aiohttp.ClientSession() as session:
+
+    hq_chat_id = None
+    log_topic_id = None
+    try:
+        iris_db_path = os.path.join(os.path.dirname(_curr_dir), "бот2.0", "data", "iris.db")
+        if os.path.exists(iris_db_path):
+            import aiosqlite
+            async with aiosqlite.connect(iris_db_path) as idb:
+                async with idb.execute("SELECT key, value FROM staff_hq_settings WHERE key IN ('staff_hq_chat_id', 'staff_log_topic_id')") as cur:
+                    for k, v in await cur.fetchall():
+                        if k == 'staff_hq_chat_id' and v:
+                            hq_chat_id = int(v)
+                        elif k == 'staff_log_topic_id' and v:
+                            log_topic_id = int(v)
+    except Exception:
+        pass
+
+    targets = []
+    if hq_chat_id:
+        targets.append((hq_chat_id, log_topic_id))
+    else:
         for rid in TG_OWNERS:
+            targets.append((rid, None))
+
+    async with aiohttp.ClientSession() as session:
+        for cid, tid in targets:
             try:
-                payload = {"chat_id": rid, "text": admin_text, "parse_mode": "HTML"}
+                payload = {"chat_id": cid, "text": admin_text, "parse_mode": "HTML"}
+                if tid:
+                    payload["message_thread_id"] = tid
                 await session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5))
             except Exception as e:
                 log.warning("Ошибка отправки в Telegram: %s", e)
@@ -514,20 +540,6 @@ async def notify_discord_about_ticket(ticket_id: int, user_id: int, user_name: s
                         "label": "✋ Взять тикет",
                         "custom_id": f"st_omni_claim:{ticket_id}",
                         "emoji": {"name": "💬"}
-                    },
-                    {
-                        "type": 2,
-                        "style": 2,
-                        "label": "🤖 Авто-ответ ИИ",
-                        "custom_id": f"st_omni_ai:{ticket_id}",
-                        "emoji": {"name": "🤖"}
-                    },
-                    {
-                        "type": 2,
-                        "style": 4,
-                        "label": "🔒 Закрыть",
-                        "custom_id": f"st_omni_close:{ticket_id}",
-                        "emoji": {"name": "🚫"}
                     }
                 ]
             }
@@ -2524,13 +2536,13 @@ async def vk_message_handler(message: Message):
 # ═══════════════════════════════════════════════════════════════
 
 async def vk_support_broadcast_loop():
-    """Фоновая рассылка каждые 3 часа во все активные беседы ВКонтакте."""
-    log.info("Запущен воркер автосообщений техподдержки и идей ВКонтакте (интервал: 3 часа)...")
+    """Фоновая рассылка каждые 8 часов во все активные беседы ВКонтакте."""
+    log.info("Запущен воркер автосообщений техподдержки и идей ВКонтакте (интервал: 8 часов)...")
     await asyncio.sleep(60)
     while True:
         try:
             now = int(time.time())
-            interval = 3 * 3600  # 3 часа = 10800 секунд
+            interval = 8 * 3600  # 8 часов = 28800 секунд
             chats = await db.get_all_vk_chats()
 
             broadcast_text = (
