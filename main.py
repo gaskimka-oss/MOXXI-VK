@@ -337,14 +337,23 @@ def get_main_keyboard(is_chat: bool = False) -> str:
 # 🛠 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ═══════════════════════════════════════════════════════════════
 
+_VK_USER_CACHE: dict[int, tuple[str, str, float]] = {}
+
 async def get_vk_user_info(user_id: int) -> tuple[str, str]:
+    now = time.time()
+    cached = _VK_USER_CACHE.get(user_id)
+    if cached and (now - cached[2]) < 3600:
+        return cached[0], cached[1]
     try:
         users = await bot.api.users.get(user_ids=[user_id])
         if users:
             u = users[0]
+            _VK_USER_CACHE[user_id] = (u.first_name, u.last_name, now)
             return u.first_name, u.last_name
     except Exception as e:
         log.warning("Ошибка получения инфо о VK user %d: %s", user_id, e)
+    if cached:
+        return cached[0], cached[1]
     return "Пользователь", ""
 
 async def get_display_name(user_id: int) -> str:
@@ -658,34 +667,40 @@ async def vk_message_handler(message: Message):
             f"• «залог @юзер» — друг на свободе может внести выкуп 10 000 🌑"
         )
 
-    # 🌟 ОБРАБОТЧИК РАСШИРЕННЫХ СИСТЕМ (400+ КОМАНД)
-    ext_handled = await extended.handle_extended_command(
-        message=message,
-        cmd=cmd,
-        args=args,
-        user_id=user_id,
-        db_uid=db_uid,
-        db_cid=db_cid,
-        is_chat=is_chat,
-        user_display=user_display,
-        my_rank=my_rank,
-        get_vk_user_info_func=get_vk_user_info,
-        extract_target_func=extract_target_vk_id
-    )
-    if ext_handled:
-        return
-
     # ═══════════════════════════════════════════════════════════
-    # 1. ❓ МЕНЮ, СПРАВКА И ПОМОЩЬ (415+ КОМАНД, 12 РАЗДЕЛОВ)
+    # 0. ➕ ДОБАВЛЕНИЕ В БЕСЕДУ
     # ═══════════════════════════════════════════════════════════
     import commands_catalog
     _c_low = clean_txt.lower()
     _a_low = args.lower().strip()
 
+    _is_invite_cmd = (
+        (cmd == "в" and args in ("беседу", "беседы", "группу", "чат")) or
+        cmd in ("добавить", "инвайт", "invite", "беседа", "беседу", "пригласить", "в_беседу", "вбеседу") or
+        "в беседу" in _c_low or
+        "добавить в беседу" in _c_low
+    )
+    if _is_invite_cmd:
+        invite_kb = Keyboard(inline=True)
+        invite_kb.add(OpenLink(f"https://vk.com/add_group_app?gid={VK_GROUP_ID}", "➕ Добавить в беседу"))
+        return await message.answer(
+            "🌟 КАК ДОБАВИТЬ MOXXI 3.0 В СВОЮ БЕСЕДУ:\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "1. Нажмите на кнопку «➕ Добавить в беседу» ниже или перейдите по ссылке:\n"
+            f"👉 https://vk.com/add_group_app?gid={VK_GROUP_ID}\n\n"
+            "2. Выберите нужную беседу из списка ваших чатов\n"
+            "3. Выдайте боту права Администратора, чтобы работали игры, ранги (1-10) и автокик нарушителей!\n\n"
+            "🎮 После добавления напишите в беседе «старт» или «команды»!",
+            keyboard=invite_kb.get_json()
+        )
+
+    # ═══════════════════════════════════════════════════════════
+    # 1. ❓ МЕНЮ, СПРАВКА И ПОМОЩЬ (415+ КОМАНД, 12 РАЗДЕЛОВ)
+    # ═══════════════════════════════════════════════════════════
     _is_help_cmd = cmd in ("старт", "начать", "помощь", "меню", "хелп", "команды", "help", "команда")
     _is_nav_num = cmd in [f"{i}." for i in range(1, 13)] or cmd in [str(i) for i in range(1, 13)]
     _is_section_word = cmd in ("раздел", "разделы")
-    _is_all_sections = (cmd in ("все", "всё") and ("раздел" in _a_low or "команд" in _a_low))
+    _is_all_sections = "все команды" in _c_low or "все разделы" in _c_low or (cmd in ("все", "всё") and ("раздел" in _a_low or "команд" in _a_low))
     _is_search = cmd in ("найти", "поиск", "искать", "поиск_команд", "search")
     _is_nav_text = any(phrase in _c_low for phrase in (
         "модерация", "баны/варны", "настройки", "экономика", "бизнесы/дома",
@@ -757,19 +772,25 @@ async def vk_message_handler(message: Message):
             else:
                 return await message.answer(commands_catalog.get_hub_text(), keyboard=commands_catalog.get_hub_keyboard())
 
-    # ➕ ДОБАВЛЕНИЕ В БЕСЕДУ
-    if (cmd == "в" and args in ("беседу", "беседы", "группу", "чат")) or cmd in ("добавить", "инвайт", "invite", "беседа", "беседу", "пригласить", "в_беседу", "вбеседу"):
-        invite_kb = Keyboard(inline=True)
-        invite_kb.add(OpenLink("https://vk.com/club243066051", "➕ Добавить в беседу"))
-        return await message.answer(
-            "🌟 КАК ДОБАВИТЬ MOXXI 3.0 В СВОЮ БЕСЕДУ:\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "1. Нажмите на кнопку «➕ Добавить в беседу» ниже или перейдите по ссылке: vk.com/club243066051\n"
-            "2. В меню сообщества выберите «Добавить в беседу» и укажите нужный чат\n"
-            "3. Выдайте боту права Администратора, чтобы работали игры, ранги (1-10) и автокик нарушителей!\n\n"
-            "🎮 После добавления напишите в беседе «старт» или «команды»!",
-            keyboard=invite_kb.get_json()
+    # 🌟 ОБРАБОТЧИК РАСШИРЕННЫХ СИСТЕМ (400+ КОМАНД)
+    try:
+        ext_handled = await extended.handle_extended_command(
+            message=message,
+            cmd=cmd,
+            args=args,
+            user_id=user_id,
+            db_uid=db_uid,
+            db_cid=db_cid,
+            is_chat=is_chat,
+            user_display=user_display,
+            my_rank=my_rank,
+            get_vk_user_info_func=get_vk_user_info,
+            extract_target_func=extract_target_vk_id
         )
+        if ext_handled:
+            return
+    except Exception as e:
+        log.error("Исключение в handle_extended_command: %s", e, exc_info=True)
 
     # ═══════════════════════════════════════════════════════════
     # 2. 👑 СИСТЕМА РАНГОВ (1–10)
